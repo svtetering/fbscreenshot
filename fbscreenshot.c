@@ -46,19 +46,37 @@ int main(int argc, char** argv) {
     char* file_size_header = &data[2];
     memcpy(file_size_header, (uint32_t*)&file_size, sizeof(uint32_t));
 
-    data[0x0A] = 0x25;
-    data[0x0E] = 12;
+    data[0x0A] = 0x41;
+    data[0x0E] = 40;
     
     char* image_width_dib = &data[0x12];
-    char* image_height_dib = &data[0x14];
-    memcpy(image_width_dib, &capture_width, sizeof(uint16_t));
+    char* image_height_dib = &data[0x16];
+    memcpy(image_width_dib, &capture_width, sizeof(int));
     int flipped_image_height = -capture_height;
-    memcpy(image_height_dib, &flipped_image_height, sizeof(uint16_t));
+    memcpy(image_height_dib, &flipped_image_height, sizeof(int));
 
-    data[0x16] = 1;
-    data[0x18] = vinfo.bits_per_pixel;
+    data[0x1A] = 1;
+    data[0x1C] = vinfo.bits_per_pixel;
+    data[0x1E] = 0;
 
-    char* pixel_data = &data[0x25];
+    char* image_size_dib = &data[0x22];
+    memcpy(image_size_dib, (uint32_t*)&file_size, sizeof(uint32_t));
+
+    char* horizontal_image_res_dib = &data[0x26];
+    char* vertical_image_res_dib = &data[0x2A];
+    int horizontal_image_res = 0;
+    int vertical_image_res = 0;
+    memcpy(horizontal_image_res_dib, &horizontal_image_res, sizeof(int));
+    memcpy(vertical_image_res_dib, &vertical_image_res, sizeof(int));
+
+    char* num_colors_dib = &data[0x2E];
+    char* num_imp_colors_dib = &data[0x32];
+    uint32_t num_colors = 0;
+    uint32_t num_imp_colors = 0;
+    memcpy(num_colors_dib, &num_colors, sizeof(uint32_t));
+    memcpy(num_colors_dib, &num_imp_colors, sizeof(uint32_t));
+
+    char* pixel_data = &data[0x41];
 
     if (capture_full_virtual_framebuffer) {
         succ = read(framebuffer_fd, pixel_data, file_size);
