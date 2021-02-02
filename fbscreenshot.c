@@ -39,7 +39,7 @@ int main(int argc, char** argv) {
     size_t file_size = capture_width * capture_height * bytes_per_pixel;
 
     char data[25 + file_size];
-    memset(&data[0], 0, file_size);
+    memset(&data[0], 0, 25);
 
     data[0x00] = 0x42;
     data[0x01] = 0x4D;
@@ -56,7 +56,7 @@ int main(int argc, char** argv) {
     memcpy(image_height_dib, &flipped_image_height, sizeof(uint16_t));
 
     data[0x16] = 1;
-    data[0x18] = 8 * bytes_per_pixel;
+    data[0x18] = vinfo.bits_per_pixel;
 
     char* pixel_data = &data[0x25];
 
