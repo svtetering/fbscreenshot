@@ -91,6 +91,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // Get information about the framebuffer using ioctl()
     struct fb_var_screeninfo vinfo;
     int succ = ioctl(framebuffer_fd, FBIOGET_VSCREENINFO, &vinfo);
     if (succ == -1) {
@@ -108,13 +109,22 @@ int main(int argc, char** argv) {
     }
 
     int bytes_per_pixel = vinfo.bits_per_pixel / 8;
-    size_t image_size = capture_width * capture_height * bytes_per_pixel;
+    int padding_bytes = (4 - (capture_width * bytes_per_pixel) % 4) % 4;
+    size_t image_size = capture_width * capture_height * bytes_per_pixel + padding_bytes * capture_height;
     size_t file_size = image_size + 54;
     char data[file_size];
     write_bmp_header(&data[0], capture_width, -capture_height, bytes_per_pixel, image_size);
 
     char* pixel_data = &data[0x36];
     if (capture_full_virtual_framebuffer) {
+        for (int y = 0; y < vinfo.yres_virtual; y++) {
+            char* row = pixel_data + y * vinfo.xres_virtual * bytes_per_pixel + y * padding_bytes;
+            succ = read(framebuffer_fd, row, vinfo.xres_virtual * bytes_per_pixel);
+            if (succ == -1) {
+                perror("read");
+                return 1;
+            }
+        }
         succ = read(framebuffer_fd, pixel_data, file_size);
         if (succ == -1) {
             perror("read");
@@ -127,15 +137,12 @@ int main(int argc, char** argv) {
             // Skip vinfo.xoffset columns
             lseek(framebuffer_fd, vinfo.xoffset * bytes_per_pixel, SEEK_CUR);
 
-            char* row = pixel_data + y * vinfo.xres * bytes_per_pixel;
+            char* row = pixel_data + y * vinfo.xres * bytes_per_pixel + y * padding_bytes;
             succ = read(framebuffer_fd, row, vinfo.xres * bytes_per_pixel);
             if (succ == -1) {
                 perror("read");
                 return 1;
             }
-
-            // Padding for 4 byte alignment
-            memset(row + succ, 0, (4 - succ % 4) % 4);
 
             // Skip horizontal part of framebuffer that isn't shown on screen
             lseek(framebuffer_fd, (vinfo.xres_virtual - vinfo.xres - vinfo.xoffset) * bytes_per_pixel, SEEK_CUR);
