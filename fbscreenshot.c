@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include <linux/fb.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
@@ -55,6 +56,25 @@ void write_bmp_header(char* buffer, int width, int height, int bytes_per_pixel, 
     memcpy(num_colors_dib, &num_imp_colors, sizeof(uint32_t));
 }
 
+void read_framebuffer_pixels(char* pixel_data, int framebuffer_fd, struct fb_var_screeninfo vinfo, int bytes_per_pixel, int padding_bytes) {
+    // Skip vinfo.yoffset rows
+    lseek(framebuffer_fd, vinfo.yoffset * vinfo.xres_virtual * bytes_per_pixel, SEEK_CUR);
+    for (int y = 0; y < vinfo.yres; y++) {
+        // Skip vinfo.xoffset columns
+        lseek(framebuffer_fd, vinfo.xoffset * bytes_per_pixel, SEEK_CUR);
+
+        char* row = pixel_data + y * vinfo.xres * bytes_per_pixel + y * padding_bytes;
+        int succ = read(framebuffer_fd, row, vinfo.xres * bytes_per_pixel);
+        if (succ == -1) {
+            perror("read");
+            exit(1);
+        }
+
+        // Skip horizontal part of framebuffer that isn't shown on screen
+        lseek(framebuffer_fd, (vinfo.xres_virtual - vinfo.xres - vinfo.xoffset) * bytes_per_pixel, SEEK_CUR);
+    }
+}
+
 int main(int argc, char** argv) {
     char* framebuffer_path = "/dev/fb0";
     char* output_path = "output.bmp";
@@ -99,55 +119,25 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    int capture_width, capture_height;
-    if (capture_full_virtual_framebuffer) {
-        capture_width = vinfo.xres_virtual;
-        capture_height = vinfo.yres_virtual;
-    } else {
-        capture_width = vinfo.xres;
-        capture_height = vinfo.yres;
-    }
-
+    int capture_width = capture_full_virtual_framebuffer ? vinfo.xres_virtual : vinfo.xres;
+    int capture_height = capture_full_virtual_framebuffer ? vinfo.yres_virtual : vinfo.yres;
     int bytes_per_pixel = vinfo.bits_per_pixel / 8;
     int padding_bytes = (4 - (capture_width * bytes_per_pixel) % 4) % 4;
+    
     size_t image_size = capture_width * capture_height * bytes_per_pixel + padding_bytes * capture_height;
     size_t file_size = image_size + 54;
     char data[file_size];
     write_bmp_header(&data[0], capture_width, -capture_height, bytes_per_pixel, image_size);
 
-    char* pixel_data = &data[0x36];
     if (capture_full_virtual_framebuffer) {
-        for (int y = 0; y < vinfo.yres_virtual; y++) {
-            char* row = pixel_data + y * vinfo.xres_virtual * bytes_per_pixel + y * padding_bytes;
-            succ = read(framebuffer_fd, row, vinfo.xres_virtual * bytes_per_pixel);
-            if (succ == -1) {
-                perror("read");
-                return 1;
-            }
-        }
-        succ = read(framebuffer_fd, pixel_data, file_size);
-        if (succ == -1) {
-            perror("read");
-            return 1;
-        }
-    } else {
-        // Skip vinfo.yoffset rows
-        lseek(framebuffer_fd, vinfo.yoffset * vinfo.xres_virtual * bytes_per_pixel, SEEK_CUR);
-        for (int y = 0; y < vinfo.yres; y++) {
-            // Skip vinfo.xoffset columns
-            lseek(framebuffer_fd, vinfo.xoffset * bytes_per_pixel, SEEK_CUR);
-
-            char* row = pixel_data + y * vinfo.xres * bytes_per_pixel + y * padding_bytes;
-            succ = read(framebuffer_fd, row, vinfo.xres * bytes_per_pixel);
-            if (succ == -1) {
-                perror("read");
-                return 1;
-            }
-
-            // Skip horizontal part of framebuffer that isn't shown on screen
-            lseek(framebuffer_fd, (vinfo.xres_virtual - vinfo.xres - vinfo.xoffset) * bytes_per_pixel, SEEK_CUR);
-        }
+        // Adjust boundaries so read_framebuffer_pixels() reads the whole framebuffer
+        vinfo.xoffset = 0;
+        vinfo.yoffset = 0;
+        vinfo.xres = vinfo.xres_virtual;
+        vinfo.yres = vinfo.yres_virtual;
     }
+    char* pixel_data = &data[0x36];
+    read_framebuffer_pixels(pixel_data, framebuffer_fd, vinfo, bytes_per_pixel, padding_bytes);
 
     int output_fd = open(output_path, O_WRONLY | O_CREAT, 0644);
     if (output_fd == -1) {
