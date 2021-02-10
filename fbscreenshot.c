@@ -8,10 +8,6 @@
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 
-const char* framebuffer_path = "/dev/fb0";
-const char* output_path = "output.bmp";
-const bool capture_full_virtual_framebuffer = false;
-
 void write_bmp_header(char* buffer, int width, int height, int bytes_per_pixel, size_t image_size) {
     size_t file_size = image_size + 52;
 
@@ -57,6 +53,35 @@ void write_bmp_header(char* buffer, int width, int height, int bytes_per_pixel, 
 }
 
 int main(int argc, char** argv) {
+    char* framebuffer_path = "/dev/fb0";
+    char* output_path = "output.bmp";
+    bool capture_full_virtual_framebuffer = false;
+
+    for (int i = 1; i < argc; i++) {
+        char* argument = argv[i];
+        if (strcmp(argument, "--help") == 0) {
+            printf("USAGE: fbscreenshot [OPTIONS]\nOPTIONS:\n --help    - Show this help message\n -f [path] - The path of the framebuffer to read from\n -o [path] - The path of the bitmap file that is exported\n -v        - Copy full virtual framebuffer\n");
+            return 0;
+        }
+        if (strcmp(argument, "-f") == 0) {
+            if (i + 1 == argc) {
+                fprintf(stderr, "-f: No path given\n");
+                return 1;
+            }
+            i++;
+            framebuffer_path = argv[i];
+        } else if (strcmp(argument, "-o") == 0) {
+            if (i + 1 == argc) {
+                fprintf(stderr, "-o: No path given\n");
+                return 1;
+            }
+            i++;
+            output_path = argv[i];
+        } else if (strcmp(argument, "-v") == 0) {
+            capture_full_virtual_framebuffer = true;
+        }
+    }
+
     int framebuffer_fd = open(framebuffer_path, O_RDONLY);
     if (framebuffer_fd == -1) {
         perror("open");
@@ -114,7 +139,11 @@ int main(int argc, char** argv) {
         }
     }
 
-    int output_fd = open(output_path, O_WRONLY | O_CREAT);
+    int output_fd = open(output_path, O_WRONLY | O_CREAT, 0644);
+    if (output_fd == -1) {
+        perror("open");
+        return 1;
+    }
     write(output_fd, data, sizeof(data));
 
     close(framebuffer_fd);
