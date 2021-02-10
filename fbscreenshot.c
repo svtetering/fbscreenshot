@@ -11,15 +11,18 @@
 void write_bmp_header(char* buffer, int width, int height, int bytes_per_pixel, size_t image_size) {
     size_t file_size = image_size + 52;
 
+    // Set all bytes in the header to 0
     memset(buffer, 0, 52);
 
     // Magic number: BM
     buffer[0x00] = 0x42;
     buffer[0x01] = 0x4D;
 
+    // File size
     char* file_size_header = &buffer[2];
     memcpy(file_size_header, (uint32_t*)&file_size, sizeof(uint32_t));
 
+    // Pixel data starting address
     buffer[0x0A] = 0x36;
 
     // Start of DIB header BITMAPINFOHEADER
