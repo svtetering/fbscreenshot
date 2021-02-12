@@ -140,7 +140,7 @@ int main(int argc, char** argv) {
     char* pixel_data = &data[0x36];
     read_framebuffer_pixels(pixel_data, framebuffer_fd, vinfo, bytes_per_pixel, padding_bytes);
 
-    int output_fd = open(output_path, O_WRONLY | O_CREAT, 0644);
+    int output_fd = open(output_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (output_fd == -1) {
         perror("open");
         return 1;
