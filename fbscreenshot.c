@@ -5,9 +5,11 @@
 #include <unistd.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <time.h>
 #include <linux/fb.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
+#include <sys/mman.h>
 
 void write_bmp_header(char* buffer, int width, int height, int bytes_per_pixel, size_t image_size) {
     size_t file_size = image_size + 54;
@@ -56,22 +58,15 @@ void write_bmp_header(char* buffer, int width, int height, int bytes_per_pixel, 
     memcpy(num_colors_dib, &num_imp_colors, sizeof(uint32_t));
 }
 
-void read_framebuffer_pixels(char* pixel_data, int framebuffer_fd, struct fb_var_screeninfo vinfo, int bytes_per_pixel, int padding_bytes) {
-    // Skip vinfo.yoffset rows
-    lseek(framebuffer_fd, vinfo.yoffset * vinfo.xres_virtual * bytes_per_pixel, SEEK_CUR);
+void read_framebuffer_pixels(char* pixel_data, char* framebuffer, struct fb_var_screeninfo vinfo, int bytes_per_pixel, int padding_bytes) {
     for (int y = 0; y < vinfo.yres; y++) {
-        // Skip vinfo.xoffset columns
-        lseek(framebuffer_fd, vinfo.xoffset * bytes_per_pixel, SEEK_CUR);
-
-        char* row = pixel_data + y * vinfo.xres * bytes_per_pixel + y * padding_bytes;
-        int succ = read(framebuffer_fd, row, vinfo.xres * bytes_per_pixel);
-        if (succ == -1) {
-            perror("read");
+        int framebuffer_y_offset = (vinfo.yoffset + y) * vinfo.xres_virtual * bytes_per_pixel;
+        int output_y_offset = y * vinfo.xres * bytes_per_pixel + y * padding_bytes;
+        void* succ = memcpy(pixel_data + output_y_offset, framebuffer + framebuffer_y_offset, vinfo.xres * bytes_per_pixel);
+        if (succ == (void*) -1) {
+            perror("memcpy");
             exit(1);
         }
-
-        // Skip horizontal part of framebuffer that isn't shown on screen
-        lseek(framebuffer_fd, (vinfo.xres_virtual - vinfo.xres - vinfo.xoffset) * bytes_per_pixel, SEEK_CUR);
     }
 }
 
@@ -127,8 +122,16 @@ int main(int argc, char** argv) {
     size_t image_size = capture_width * capture_height * bytes_per_pixel + padding_bytes * capture_height;
     size_t file_size = image_size + 54;
     
-    char data[file_size];
+    char* data = (char*) malloc(file_size);
     write_bmp_header(&data[0], capture_width, -capture_height, bytes_per_pixel, image_size);
+
+    int output_fd = open(output_path, O_RDWR | O_CREAT | O_TRUNC, 0644);
+    if (output_fd == -1) {
+        perror("open");
+        return 1;
+    }
+    write(output_fd, data, file_size);
+    free(data);
 
     if (capture_full_virtual_framebuffer) {
         // Adjust boundaries so read_framebuffer_pixels() reads the whole framebuffer
@@ -137,15 +140,27 @@ int main(int argc, char** argv) {
         vinfo.xres = vinfo.xres_virtual;
         vinfo.yres = vinfo.yres_virtual;
     }
-    char* pixel_data = &data[0x36];
-    read_framebuffer_pixels(pixel_data, framebuffer_fd, vinfo, bytes_per_pixel, padding_bytes);
 
-    int output_fd = open(output_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (output_fd == -1) {
-        perror("open");
+    char* output = mmap(NULL, file_size, PROT_WRITE, MAP_SHARED, output_fd, 0);
+    if (output == (void*) -1) {
+        perror("mmap");
         return 1;
     }
-    write(output_fd, data, sizeof(data));
+    char* pixel_data = output + 54;
+
+    char* framebuffer = mmap(NULL, vinfo.xres_virtual * vinfo.yres_virtual * bytes_per_pixel, PROT_READ, MAP_PRIVATE, framebuffer_fd, 0);
+    if (framebuffer == (void*) -1) {
+        perror("mmap");
+        return 1;
+    }
+    
+    struct timespec time_to_sleep;
+    time_to_sleep.tv_nsec = (1.0 / 60.0) * 1000000000;
+    for (;;) {
+        read_framebuffer_pixels(pixel_data, framebuffer, vinfo, bytes_per_pixel, padding_bytes);
+        msync(pixel_data, image_size, MS_INVALIDATE);
+        nanosleep(&time_to_sleep, &time_to_sleep);
+    }
 
     close(framebuffer_fd);
     close(output_fd);
